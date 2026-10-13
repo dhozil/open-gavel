@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input, Label, Textarea } from "../components/ui/field";
@@ -9,9 +9,10 @@ import { useWrite } from "../lib/useWrite";
 
 export function Report() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { address } = useAccount();
   const { state, submit, busy, explorer } = useWrite();
-  const [communityId, setCommunityId] = useState("general");
+  const [communityId, setCommunityId] = useState(() => searchParams.get("cid")?.trim() ?? "general");
   const [content, setContent] = useState("");
   const [author, setAuthor] = useState("");
   const [context, setContext] = useState("");
@@ -26,6 +27,12 @@ export function Report() {
   const [evTypeWarn, setEvTypeWarn] = useState<string | null>(null);
   const [srcUrl, setSrcUrl] = useState("");
   const [srcWarn, setSrcWarn] = useState<string | null>(null);
+
+  // Deep link (?cid=…) from a community or case page wins over the default.
+  useEffect(() => {
+    const cid = searchParams.get("cid")?.trim();
+    if (cid) setCommunityId(cid);
+  }, [searchParams]);
 
   // Screenshot evidence: hashed locally (SHA-256, tamper-evident), then
   // uploaded to a no-key public host. The contract pins url+hash; an edited

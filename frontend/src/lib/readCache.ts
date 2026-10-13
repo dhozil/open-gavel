@@ -88,7 +88,9 @@ export function rateLimitMessage(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Retry transient (rate-limit/network) failures with growing delays. */
+/** Retry transient (rate-limit/network) failures with growing delays.
+ *  Kept short for UI reads (2s/4s): a hot budget won't cool in seconds, so
+ *  fail fast into the honest rate-limit message instead of hanging the page. */
 export async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   let last: unknown = null;
   for (let i = 0; i < tries; i++) {
@@ -97,7 +99,7 @@ export async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> 
     } catch (e) {
       last = e;
       if (!isRateLimit(e) || i === tries - 1) throw e;
-      await sleep(4000 * (i + 1));
+      await sleep(2000 * (i + 1));
     }
   }
   throw last;

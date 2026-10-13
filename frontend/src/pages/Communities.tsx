@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight, ArrowUpRight, BookOpen, Landmark, Scale, Search } from "lucide-react";
 import { Card } from "../components/ui/card";
@@ -35,6 +35,10 @@ export function Communities() {
   const [registry, setRegistry] = useState<CommunitySummary[] | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  // Monotonic request id: rapid general → pixel → probegarden clicks must
+  // never let an older, slower response overwrite the newest selection.
+  const reqRef = useRef(0);
 
   // On-chain registry: every community, no hardcoded list.
   // Deep link (?cid=…) opens a community straight away — e.g. right after creating it.
@@ -70,17 +74,30 @@ export function Communities() {
   const load = async (cid: string) => {
     const target = cid.trim();
     if (!target) return;
+    const n = ++reqRef.current;
+    setPending(target);
     setError(null);
     try {
       const [c, list] = await Promise.all([getCommunity(target), listCases(target, 20)]);
+      if (n !== reqRef.current) return; // stale: a newer selection already won
       setCommunity(c);
       setCases(list);
       setSelected(target);
     } catch (e) {
+      if (n !== reqRef.current) return;
       setError(e instanceof Error ? e.message : String(e));
       setCommunity(null);
       setCases(null);
+    } finally {
+      if (n === reqRef.current) setPending(null);
     }
+  };
+
+  // Hover intent preloads into the read cache, so the click often resolves
+  // instantly with zero new RPC. Errors are swallowed: the real click retries.
+  const prefetch = (cid: string) => {
+    void getCommunity(cid).catch(() => undefined);
+    void listCases(cid, 20).catch(() => undefined);
   };
 
   const totalCases = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -140,6 +157,8 @@ export function Communities() {
               key={c.community_id}
               type="button"
               onClick={() => void load(c.community_id)}
+              onMouseEnter={() => prefetch(c.community_id)}
+              onFocus={() => prefetch(c.community_id)}
               className={cn(
                 "group rounded-2xl border bg-white/70 text-left shadow-sm transition",
                 compact ? "p-3" : "p-5",
@@ -164,7 +183,14 @@ export function Communities() {
                   {counts[c.community_id] ?? "…"} {counts[c.community_id] === 1 ? "case" : "cases"}
                 </span>
                 <span className="inline-flex items-center gap-1 font-bold text-gavel-deep opacity-0 transition group-hover:opacity-100">
-                  {active ? "Viewing" : "Open"} <ArrowUpRight size={13} />
+                  {pending === c.community_id ? (
+                    <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-gavel-deep/30 border-t-gavel-deep" />
+                  ) : active ? (
+                    "Viewing"
+                  ) : (
+                    "Open"
+                  )}{" "}
+                  {pending !== c.community_id && <ArrowUpRight size={13} />}
                 </span>
               </div>
             </button>
@@ -217,10 +243,10 @@ export function Communities() {
               Record — {cases.length} {cases.length === 1 ? "case" : "cases"}
             </h2>
             <Link
-              to="/report"
+              to={`/report?cid=${encodeURIComponent(community.community_id)}`}
               className="inline-flex items-center gap-1 text-sm font-bold text-gavel-deep hover:underline"
             >
-              File a report <ArrowRight size={14} />
+              Report here <ArrowRight size={14} />
             </Link>
           </div>
           {cases.length === 0 ? (
