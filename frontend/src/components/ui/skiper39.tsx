@@ -937,18 +937,18 @@ export const OpenGavelHero = () => {
         </p>
         <div className="flex flex-wrap items-center justify-center gap-3">
           <a
-            href="#report"
+            href="/how-it-works"
             className="inline-flex items-center gap-2 rounded-full border border-court bg-gavel px-6 py-3 text-sm font-bold text-court transition hover:bg-court hover:text-parchment"
           >
             <Gavel size={16} />
-            File a report
+            See how it works
           </a>
           <a
             href="#cases"
             className="inline-flex items-center gap-2 rounded-full border border-court bg-white/60 px-6 py-3 text-sm font-bold transition hover:bg-court hover:text-parchment"
           >
             <ArrowDown size={16} />
-            Watch a verdict
+            Watch live verdicts
           </a>
         </div>
       </div>
