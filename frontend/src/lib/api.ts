@@ -227,6 +227,35 @@ export async function uploadEvidence(file: File): Promise<string> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-export const moderateCase = (a: unknown, caseId: string) => write("moderate_case", [caseId], a);
-export const appealCase = (a: unknown, caseId: string, reason: string) =>
-  write("appeal_case", [caseId, reason], a);
+export const moderateCase = (a: unknown, caseId: string, image: Uint8Array = new Uint8Array(0)) =>
+  write("moderate_case", [caseId, image], a);
+export const appealCase = (a: unknown, caseId: string, reason: string, image: Uint8Array = new Uint8Array(0)) =>
+  write("appeal_case", [caseId, reason, image], a);
+
+/** Compress to a consensus-friendly JPEG (qwik pattern): max 1280px, fed back
+ *  until under ~200KB. Returns the exact bytes to send (hash these, not the original). */
+export async function compressEvidence(file: File): Promise<Uint8Array> {
+  const bitmap = await createImageBitmap(file);
+  const ratio = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * ratio));
+  const h = Math.max(1, Math.round(bitmap.height * ratio));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable for compression.");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  let quality = 0.82;
+  for (let i = 0; i < 4; i++) {
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+    if (!blob) throw new Error("Compression failed.");
+    if (blob.size <= 200 * 1024 || quality <= 0.4) {
+      return new Uint8Array(await blob.arrayBuffer());
+    }
+    quality -= 0.15;
+  }
+  const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.4));
+  if (!blob) throw new Error("Compression failed.");
+  return new Uint8Array(await blob.arrayBuffer());
+}

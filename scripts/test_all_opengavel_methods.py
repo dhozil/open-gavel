@@ -18,10 +18,6 @@ this sweep expects a method the contract no longer has.
 """
 
 import json
-import os
-import re
-import shutil
-import subprocess
 import time
 from pathlib import Path
 
@@ -67,33 +63,38 @@ def record(method: str, kind: str, note: str, ok: bool = True) -> None:
     print(f"  [{kind:5}] {method:18} {note}")
 
 
-def full_receipt(tx: str) -> dict:
-    """Full receipt via the CLI (blocks until FINALIZED). Long timeout: LLM
-    consensus on moderate/appeal can take minutes on StudioNet.
-    The CLI asks for the keystore password even for reads, so the throwaway
-    reader password is piped via stdin (env OG_READER_PW)."""
-    exe = shutil.which("genlayer.cmd") or shutil.which("genlayer")
-    if exe is None:
-        raise SystemExit("genlayer CLI not on PATH — full receipt is only available through it")
-    pw = (os.environ.get("OG_READER_PW", "reader4321") + "\n") * 3
-    execution = status_name = payload = stdout = None
-    for attempt in range(8):
-        p = subprocess.run([exe, "receipt", tx], input=pw, capture_output=True, text=True,
-                           timeout=1200, encoding="utf-8", errors="replace")
-        out = (p.stdout or "") + (p.stderr or "")
-        m = re.search(r"execution_result:\s*'(\w+)'", out)
-        execution = m.group(1) if m else None
-        m2 = re.search(r"status_name:\s*'(\w+)'", out)
-        status_name = m2.group(1) if m2 else None
-        m4 = re.search(r"payload:\s*'([^']*)'", out)
-        payload = m4.group(1) if m4 else None
-        m5 = re.search(r"stdout:\s*'([^']*)'", out)
-        stdout = m5.group(1) if m5 else None
-        if execution is not None:
-            break
-        time.sleep(10 * (attempt + 1))
-    return {"execution": execution, "status_name": status_name,
-            "payload": payload, "stdout": stdout}
+def full_receipt(client, tx: str) -> dict:
+    """Full receipt via genlayer_py get_transaction: execution_result plus
+    consensus votes, no CLI, no keystore, no passwords. Polls until the
+    execution result is present and the lifecycle status holds still twice
+    (covers leader rotation settling on the accepted outcome)."""
+    execution = status_num = payload = stderr = None
+    last_status = object()
+    stable = 0
+    for _ in range(60):
+        try:
+            d = dict(client.get_transaction(tx))
+            lr = ((d.get("consensus_data") or {}).get("leader_receipt") or [{}])[0]
+            execution = lr.get("execution_result")
+            res = lr.get("result") or {}
+            payload = res.get("payload")
+            if isinstance(payload, dict):
+                payload = payload.get("readable", str(payload))
+            if payload is None:
+                stderr = ((lr.get("genvm_result") or {}).get("stderr") or "").strip() or None
+            status_num = d.get("status")
+        except Exception:
+            pass
+        if execution is not None and status_num == last_status:
+            stable += 1
+            if stable >= 2:
+                break
+        else:
+            stable = 0
+        last_status = status_num
+        time.sleep(10)
+    return {"execution": execution, "status_name": f"status={status_num}",
+            "payload": payload, "stdout": stderr}
 
 
 def main() -> None:
@@ -146,7 +147,7 @@ def main() -> None:
                 time.sleep(wait)
         if tx is None:
             raise RuntimeError(f"{method} could not be sent: {str(last)[:110]}")
-        rc = full_receipt(tx)
+        rc = full_receipt(client, tx)
         ok = rc["execution"] == "SUCCESS"
         note = f"exec={rc['execution']} status={rc['status_name']}"
         if not ok:
@@ -193,11 +194,25 @@ def main() -> None:
     if not ok:
         raise SystemExit("cannot continue without case general-1")
 
-    # --- 6. moderate_case (LLM consensus — slow) --------------------------------
-    write("moderate_case", ["general-1"])
+    # --- 6. moderate_case with DIRECT image bytes (qwik pattern) --------------------
+    # No fetch involved: identical calldata on every node. This is the primary
+    # evidence path going forward.
+    with open(HERE / "tests" / "fixtures" / "neutral.png", "rb") as f:
+        _img = f.read()
+    write("moderate_case", ["general-1", _img])
 
-    # --- 7. get_case -------------------------------------------------------------
-    case = call("get_case", ["general-1"])
+    # --- 7. get_case (poll past latest-nonfinal lag) ----------------------------------
+    case = None
+    for _ in range(15):
+        try:
+            case = call("get_case", ["general-1"])
+        except Exception:
+            pass
+        else:
+            if case.get("status") == "DECIDED":
+                break
+        time.sleep(10)
+    case = case or {}
     ok = (case.get("status") == "DECIDED"
           and case.get("verdict") in ("ALLOW", "WARN", "REMOVE", "BAN", "ESCALATE")
           and case.get("rules_version") == 2
@@ -210,10 +225,22 @@ def main() -> None:
     if not ok:
         failed.append("get_case:content")
 
-    # --- 8. appeal_case (LLM consensus — slow) ------------------------------------
+    # --- 8. appeal_case via URL-fetch fallback (empty bytes) -------------------------
+    # Proves the fallback still works when the moderator has no local bytes.
     write("appeal_case", ["general-1",
-                          "This was civil disagreement about budgets, please re-check against R5."])
-    appealed = call("get_case", ["general-1"])
+                          "This was civil disagreement about budgets, please re-check against R5.",
+                          b""])
+    appealed = None
+    for _ in range(15):
+        try:
+            appealed = call("get_case", ["general-1"])
+        except Exception:
+            pass
+        else:
+            if appealed.get("appeal_count") == 1:
+                break
+        time.sleep(10)
+    appealed = appealed or {}
     ok = appealed.get("appeal_count") == 1 and appealed.get("status") == "DECIDED"
     record("appeal_case:verify", "read", f"appeals={appealed.get('appeal_count')}", ok=ok)
     if not ok:

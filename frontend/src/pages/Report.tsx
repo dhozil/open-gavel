@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input, Label, Textarea } from "../components/ui/field";
-import { listCases, moderateCase, reportContent, sha256Hex, uploadEvidence } from "../lib/api";
+import { compressEvidence, listCases, moderateCase, reportContent, sha256Hex, uploadEvidence } from "../lib/api";
 import { useAccount } from "../lib/account";
 import { useWrite } from "../lib/useWrite";
 
@@ -28,6 +28,9 @@ export function Report() {
   const [srcUrl, setSrcUrl] = useState("");
   const [srcWarn, setSrcWarn] = useState<string | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
+  // Compressed bytes held for Step 2: the moderator (often you, right here)
+  // sends them straight with moderate_case — zero hosts, zero fetching.
+  const [evBytes, setEvBytes] = useState<Uint8Array | null>(null);
 
   // Deep link (?cid=…) from a community or case page wins over the default.
   useEffect(() => {
@@ -35,9 +38,9 @@ export function Report() {
     if (cid) setCommunityId(cid);
   }, [searchParams]);
 
-  // Screenshot evidence: hashed locally (SHA-256, tamper-evident), then
-  // uploaded to a no-key public host. The contract pins url+hash; an edited
-  // screenshot can never match the pinned hash.
+  // Screenshot evidence: compress in-browser (qwik pattern), hash the EXACT
+  // bytes that will be sent, then upload for public display. Upload failure
+  // never blocks consensus — the bytes travel with the verdict call itself.
   const onFile = async (f: File | undefined) => {
     if (!f) return;
     setLastFile(f);
@@ -52,12 +55,24 @@ export function Report() {
     setEvBusy(true);
     setEvError(null);
     try {
-      const bytes = await f.arrayBuffer();
-      const hash = await sha256Hex(bytes);
-      setEvPreview(URL.createObjectURL(new Blob([bytes], { type: f.type })));
-      const url = await uploadEvidence(new File([bytes], f.name, { type: f.type }));
-      setEvUrl(url);
+      const bytes = await compressEvidence(f);
+      setEvBytes(bytes);
+      const hash = await sha256Hex(bytes.buffer as ArrayBuffer);
+      setEvPreview(URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: "image/jpeg" })));
       setEvHash(hash);
+      try {
+        setEvUrl(await uploadEvidence(new File([bytes.buffer as ArrayBuffer], "evidence.jpg", { type: "image/jpeg" })));
+      } catch (e) {
+        // Display upload failed: drop the pair (contract needs BOTH url+hash
+        // or NEITHER) — the bytes still ride along to the verdict call, so
+        // consensus analyzes the image; only the public pin is lost.
+        setEvUrl("");
+        setEvHash("");
+        setEvError(
+          `Display upload failed (${e instanceof Error ? e.message : String(e)}). ` +
+          "You can still file: the image travels with your verdict request, it just won't be pinned for public audit.",
+        );
+      }
     } catch (e) {
       setEvError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -132,7 +147,7 @@ export function Report() {
 
   const requestVerdict = async () => {
     if (!filedId) return;
-    const hash = await submit((s) => moderateCase(s, filedId));
+    const hash = await submit((s) => moderateCase(s, filedId, evBytes ?? new Uint8Array(0)));
     if (hash) {
       setStep("done");
       navigate(`/case/${filedId}`);

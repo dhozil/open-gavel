@@ -28,14 +28,14 @@ def test_community_lifecycle():
     assert len(cases) == 1
     case_id = cases[0]["case_id"]
 
-    tx = contract.moderate_case(args=[case_id]).transact()
+    tx = contract.moderate_case(args=[case_id, b""]).transact()
     assert tx_execution_succeeded(tx)
 
     case = contract.get_case(args=[case_id]).call()
     assert case["status"] == "DECIDED"
     assert case["verdict"] in ("ALLOW", "WARN", "REMOVE", "BAN", "ESCALATE")
 
-    tx = contract.appeal_case(args=[case_id, "I believe this was civil disagreement, please re-check against R5."]).transact()
+    tx = contract.appeal_case(args=[case_id, "I believe this was civil disagreement, please re-check against R5.", b""]).transact()
     assert tx_execution_succeeded(tx)
 
     appealed = contract.get_case(args=[case_id]).call()

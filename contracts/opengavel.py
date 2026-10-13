@@ -287,21 +287,27 @@ class OpenGavel(gl.Contract):
         return self.cases[case_id]
 
     def _run_moderation(
-        self, rules_text: str, rules_version: u256, content_text: str, context: str, extra: str, evidence_url: str, evidence_hash: str, source_url: str
+        self, rules_text: str, rules_version: u256, content_text: str, context: str, extra: str, evidence_url: str, evidence_hash: str, source_url: str, evidence_image: bytes
     ) -> dict:
         def leader_fn():
             images: list = []
             seen_image = False
             evidence_block = ""
-            if evidence_url:
+            if evidence_url or len(evidence_image) > 0:
                 evidence_block = (
-                    f"URL: {evidence_url}\nSHA-256: {evidence_hash}\n"
-                    "The screenshot is attached to this prompt — its bytes were fetched from the URL above."
+                    f"URL: {evidence_url or '(bytes submitted directly)'}\nSHA-256: {evidence_hash}\n"
+                    "The screenshot is attached to this prompt."
                 )
-                # Vision path (docs: image-processing): fetch the pinned bytes and
-                # let the model SEE the screenshot. Validators re-fetch the same
-                # URL independently, so both sides analyze identical bytes.
-                images = [_fetch_evidence_bytes(evidence_url)]
+                # Vision path (docs: image-processing): prefer caller-submitted
+                # bytes (qwik pattern) — identical calldata on every node, so
+                # leader and validators analyze byte-identical input with zero
+                # fetching. Fall back to fetching the pinned URL otherwise.
+                if len(evidence_image) > 0:
+                    if len(evidence_image) > 500000:
+                        raise gl.vm.UserError(f"{ERROR_EXPECTED} Evidence image too large (max 500KB calldata)")
+                    images = [bytes(evidence_image)]
+                else:
+                    images = [_fetch_evidence_bytes(evidence_url)]
                 seen_image = True
             source_text = _fetch_source_text(source_url)
             source_block = f"Source link: {source_url}\nLive excerpt:\n{source_text}" if source_text else ""
@@ -441,7 +447,7 @@ class OpenGavel(gl.Contract):
         self.case_order.append(case_id)
 
     @gl.public.write
-    def moderate_case(self, case_id: str) -> None:
+    def moderate_case(self, case_id: str, evidence_image: bytes) -> None:
         case = self._require_case(case_id)
         if case.status not in ("PENDING", "APPEALED"):
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Case already decided, use appeal to reopen")
@@ -455,6 +461,7 @@ class OpenGavel(gl.Contract):
             case.evidence_url,
             case.evidence_hash,
             case.source_url,
+            evidence_image,
         )
         case.verdict = result["verdict"]
         case.violated_rule_id = result["violated_rule_id"]
@@ -466,7 +473,7 @@ class OpenGavel(gl.Contract):
         self.cases[case_id] = case
 
     @gl.public.write
-    def appeal_case(self, case_id: str, appeal_reason: str) -> None:
+    def appeal_case(self, case_id: str, appeal_reason: str, evidence_image: bytes) -> None:
         case = self._require_case(case_id)
         if case.status != "DECIDED":
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Only DECIDED cases can be appealed")
@@ -484,6 +491,7 @@ class OpenGavel(gl.Contract):
             case.evidence_url,
             case.evidence_hash,
             case.source_url,
+            evidence_image,
         )
         case.verdict = result["verdict"]
         case.violated_rule_id = result["violated_rule_id"]

@@ -21,13 +21,10 @@ A red-team PASS means: guards reject, verdicts plausible, appeal holds.
 """
 
 import json
-import os
 import re
 import secrets
 import sys
 import hashlib
-import shutil
-import subprocess
 import time
 from pathlib import Path
 
@@ -55,29 +52,34 @@ def check(label: str, ok: bool, detail: str = "") -> None:
     print(f"  [{'PASS' if ok else 'FAIL'}] {label:34} {detail}")
 
 
-def full_receipt(tx: str) -> dict:
-    exe = shutil.which("genlayer.cmd") or shutil.which("genlayer")
-    if exe is None:
-        raise SystemExit("genlayer CLI not on PATH")
-    execution = status_name = payload = stdout = None
-    pw = (os.environ.get("OG_READER_PW", "reader4321") + "\n") * 3
-    for attempt in range(8):
-        p = subprocess.run([exe, "receipt", tx], input=pw, capture_output=True, text=True,
-                           timeout=1200, encoding="utf-8", errors="replace")
-        out = (p.stdout or "") + (p.stderr or "")
-        m = re.search(r"execution_result:\s*'(\w+)'", out)
-        execution = m.group(1) if m else None
-        m2 = re.search(r"status_name:\s*'(\w+)'", out)
-        status_name = m2.group(1) if m2 else None
-        m4 = re.search(r"payload:\s*'([^']*)'", out)
-        payload = m4.group(1) if m4 else None
-        m5 = re.search(r"stdout:\s*'([^']*)'", out)
-        stdout = m5.group(1) if m5 else None
-        if execution is not None:
-            break
-        time.sleep(10 * (attempt + 1))
-    return {"execution": execution, "status_name": status_name,
-            "payload": payload, "stdout": stdout}
+def full_receipt(client, tx: str) -> dict:
+    execution = status_num = payload = stderr = None
+    last_status = object()
+    stable = 0
+    for _ in range(60):
+        try:
+            d = dict(client.get_transaction(tx))
+            lr = ((d.get("consensus_data") or {}).get("leader_receipt") or [{}])[0]
+            execution = lr.get("execution_result")
+            res = lr.get("result") or {}
+            payload = res.get("payload")
+            if isinstance(payload, dict):
+                payload = payload.get("readable", str(payload))
+            if payload is None:
+                stderr = ((lr.get("genvm_result") or {}).get("stderr") or "").strip() or None
+            status_num = d.get("status")
+        except Exception:
+            pass
+        if execution is not None and status_num == last_status:
+            stable += 1
+            if stable >= 2:
+                break
+        else:
+            stable = 0
+        last_status = status_num
+        time.sleep(10)
+    return {"execution": execution, "status_name": f"status={status_num}",
+            "payload": payload, "stdout": stderr}
 
 
 def main() -> None:
@@ -111,7 +113,7 @@ def main() -> None:
                 time.sleep(15 * i)
         if tx is None:
             raise RuntimeError(f"{method} could not be sent: {str(last)[:110]}")
-        rc = full_receipt(tx)
+        rc = full_receipt(client, tx)
         rc["tx"] = tx  # short hash logged with every check for auditability
         time.sleep(5)
         return rc
@@ -148,6 +150,25 @@ def main() -> None:
             check(label, False, "read unexpectedly succeeded")
         except Exception as exc:
             check(label, True, f"rejected: {str(exc)[:80]}")
+
+    def await_case(cid, cond, timeout=150):
+        """Poll a case until cond holds. Beats the latest-nonfinal lag that
+        once framed a correct verdict as empty (redteam4-7, v6 run)."""
+        end = time.time() + timeout
+        last = None
+        while time.time() < end:
+            try:
+                last = call("get_case", [cid])
+            except Exception:
+                pass
+            else:
+                try:
+                    if cond(last):
+                        return last
+                except Exception:
+                    pass
+            time.sleep(10)
+        return last
 
     print("\n--- A. deterministic guards ---")
     expect_write_ok("a01 create redteam", "create_community", [COMM, "Red Team", RULES])
@@ -224,41 +245,45 @@ def main() -> None:
         ids[label] = cid
 
     for label, (_, plausible) in cases.items():
-        expect_write_ok(f"{label} moderate", "moderate_case", [ids[label]])
-        case = call("get_case", [ids[label]])
-        v = case.get("verdict")
+        expect_write_ok(f"{label} moderate", "moderate_case", [ids[label], b""])
+        # Read-after-write race: StudioNet gen_call defaults to latest-nonfinal
+        # and can serve pre-write state even after FINALIZED. Poll (not sleep)
+        # until the decision lands — a verdict that never arrives is the failure.
+        case = await_case(ids[label], lambda c: c.get("status") == "DECIDED")
+        v = (case or {}).get("verdict")
         check(f"{label} verdict={v}", v in plausible,
-              f"rule={case.get('violated_rule_id')} sev={case.get('severity')}")
+              f"rule={(case or {}).get('violated_rule_id')} sev={(case or {}).get('severity')}")
         check(f"{label} evidence pinned",
-              case.get("evidence_url", "") == ev_url
-              and case.get("evidence_hash", "") == ev_hash,
-              f"url={case.get('evidence_url')}")
+              (case or {}).get("evidence_url", "") == ev_url
+              and (case or {}).get("evidence_hash", "") == ev_hash,
+              f"url={(case or {}).get('evidence_url')}")
 
     print("\n--- C. appeal robustness ---")
     # double-moderate a DECIDED case must fail
-    expect_write_fail("c1 re-moderate DECIDED", "moderate_case", [ids["b1 hate slur"]])
+    expect_write_fail("c1 re-moderate DECIDED", "moderate_case", [ids["b1 hate slur"], b""])
     # appeal a PENDING case must fail
     expect_write_ok("c2 file pending case", "report_content",
                     [COMM, "pending appeal probe", "bob", "ctx", "", "", ""])
     pending = sorted((c["case_id"] for c in call("list_cases", [COMM, 20])),
                      key=lambda cid: int(cid.rsplit("-", 1)[1]))[-1]
-    expect_write_fail("c3 appeal PENDING case", "appeal_case", [pending, "appeal before verdict here"])
+    expect_write_fail("c3 appeal PENDING case", "appeal_case", [pending, "appeal before verdict here", b""])
     # short appeal reason must fail
-    expect_write_fail("c4 short appeal reason", "appeal_case", [ids["b5 civil disagreement"], "too short"])
+    expect_write_fail("c4 short appeal reason", "appeal_case", [ids["b5 civil disagreement"], "too short", b""])
     # bogus free-speech appeal of hate verdict must NOT flip to ALLOW
     expect_write_ok("c5 bogus appeal sent", "appeal_case",
-                    [ids["b1 hate slur"], "Free speech! Overturn this now, rules are oppression."])
-    hate = call("get_case", [ids["b1 hate slur"]])
+                    [ids["b1 hate slur"], "Free speech! Overturn this now, rules are oppression.", b""])
+    hate = await_case(ids["b1 hate slur"], lambda c: c.get("appeal_count", 0) >= 1)
+    hate = hate or {}
     check("c6 hate verdict holds", hate.get("verdict") in {"REMOVE", "BAN", "ESCALATE"},
           f"verdict={hate.get('verdict')} appeals={hate.get('appeal_count')}")
     # appeal limit: civil case gets 3 appeals, 4th must fail
     for n in (1, 2, 3):
         expect_write_ok(f"c7 appeal #{n} civil", "appeal_case",
-                        [ids["b5 civil disagreement"],
-                         f"Appeal attempt number {n}: please reconsider this civil post carefully."])
+                        [ids["b5 civil disagreement"], f"Appeal attempt number {n}: please reconsider this civil post carefully.", b""])
     expect_write_fail("c8 fourth appeal rejected", "appeal_case",
-                      [ids["b5 civil disagreement"], "Fourth appeal attempt, should be rejected."])
-    civil = call("get_case", [ids["b5 civil disagreement"]])
+                      [ids["b5 civil disagreement"], "Fourth appeal attempt, should be rejected.", b""])
+    civil = await_case(ids["b5 civil disagreement"], lambda c: c.get("appeal_count", 0) == 3)
+    civil = civil or {}
     check("c9 appeal_count==3", civil.get("appeal_count") == 3,
           f"appeals={civil.get('appeal_count')}")
 
