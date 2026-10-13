@@ -27,6 +27,7 @@ export function Report() {
   const [evTypeWarn, setEvTypeWarn] = useState<string | null>(null);
   const [srcUrl, setSrcUrl] = useState("");
   const [srcWarn, setSrcWarn] = useState<string | null>(null);
+  const [lastFile, setLastFile] = useState<File | null>(null);
 
   // Deep link (?cid=…) from a community or case page wins over the default.
   useEffect(() => {
@@ -39,6 +40,7 @@ export function Report() {
   // screenshot can never match the pinned hash.
   const onFile = async (f: File | undefined) => {
     if (!f) return;
+    setLastFile(f);
     if (!f.type.startsWith("image/")) {
       setEvError("Only image files (PNG/JPG screenshots).");
       return;
@@ -193,7 +195,11 @@ export function Report() {
                 type="file"
                 accept="image/*"
                 disabled={evBusy || busy}
-                onChange={(e) => void onFile(e.target.files?.[0])}
+                onChange={(e) => {
+                  void onFile(e.target.files?.[0]);
+                  // reset so picking the SAME file again still fires onChange (retry path)
+                  e.target.value = "";
+                }}
                 className="block w-full cursor-pointer rounded-xl border border-dashed border-court/30 bg-white px-3.5 py-2.5 text-sm file:mr-3 file:rounded-full file:border file:border-court file:bg-gavel file:px-3 file:py-1 file:text-xs file:font-bold"
               />
               {evBusy && <p className="mt-1.5 text-xs opacity-60">Hashing + uploading…</p>}
@@ -206,7 +212,21 @@ export function Report() {
                   </div>
                 </div>
               )}
-              {evError && <p className="mt-1.5 text-xs text-red-800">{evError}</p>}
+              {evError && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <p className="w-full text-xs text-red-800">{evError}</p>
+                  {lastFile && (
+                    <Button
+                      variant="outline"
+                      disabled={evBusy}
+                      onClick={() => void onFile(lastFile)}
+                      className="px-4 py-1.5"
+                    >
+                      Retry upload
+                    </Button>
+                  )}
+                </div>
+              )}
               <div className="mt-2">
                 <Label>…or paste a direct image URL + its SHA-256</Label>
                 <p className="-mt-1 mb-2 text-xs opacity-60">

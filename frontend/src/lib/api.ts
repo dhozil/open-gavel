@@ -178,17 +178,41 @@ export async function verifyEvidence(
   return hash.toLowerCase() === pinned.toLowerCase() ? "match" : "mismatch";
 }
 
-/** Anonymous no-key image host for screenshot evidence (Catbox). */
+/** Anonymous no-key image host for screenshot evidence (Catbox).
+ *  Retries with backoff: the host occasionally resets connections
+ *  (seen server-side too), and StudioNet-era file hosts rate-limit by IP. */
 export async function uploadEvidence(file: File): Promise<string> {
-  const form = new FormData();
-  form.append("reqtype", "fileupload");
-  form.append("fileToUpload", file);
-  const res = await fetch("https://catbox.moe/user/api.php", { method: "POST", body: form });
-  if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status}). Host the image anywhere public and paste its URL instead.`);
-  const url = (await res.text()).trim();
-  if (!url.startsWith("https://")) throw new Error(`Upload rejected: ${url.slice(0, 80)}`);
-  return url;
+  let last = "";
+  for (let i = 0; i < 3; i++) {
+    try {
+      const form = new FormData();
+      form.append("reqtype", "fileupload");
+      form.append("fileToUpload", file);
+      const res = await fetch("https://catbox.moe/user/api.php", { method: "POST", body: form });
+      if (!res.ok) {
+        last = `Upload rejected (HTTP ${res.status}).`;
+        await sleep(2000 * (i + 1));
+        continue;
+      }
+      const url = (await res.text()).trim();
+      if (!url.startsWith("https://")) {
+        last = `Upload rejected: ${url.slice(0, 80)}`;
+        await sleep(2000 * (i + 1));
+        continue;
+      }
+      return url;
+    } catch (e) {
+      last = e instanceof Error ? e.message : String(e);
+      await sleep(2000 * (i + 1));
+    }
+  }
+  throw new Error(
+    `Upload failed after 3 tries (${last || "network blocked"}). ` +
+    "Check ad-blocker/VPN, or host the image anywhere public and paste its URL + SHA-256 below.",
+  );
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const moderateCase = (a: unknown, caseId: string) => write("moderate_case", [caseId], a);
 export const appealCase = (a: unknown, caseId: string, reason: string) =>
   write("appeal_case", [caseId, reason], a);
