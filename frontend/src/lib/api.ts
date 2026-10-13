@@ -49,6 +49,7 @@ export interface CaseDetail {
   appeal_count: number;
   evidence_url: string;
   evidence_hash: string;
+  source_url: string;
 }
 
 async function read<T>(functionName: string, args: unknown[] = []): Promise<T> {
@@ -152,7 +153,8 @@ export const reportContent = (
   context: string,
   evidenceUrl = "",
   evidenceHash = "",
-) => write("report_content", [communityId, content, author, context, evidenceUrl, evidenceHash], a);
+  sourceUrl = "",
+) => write("report_content", [communityId, content, author, context, evidenceUrl, evidenceHash, sourceUrl], a);
 
 /** SHA-256 of bytes, hex-encoded — the tamper-evidence commitment. */
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {

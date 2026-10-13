@@ -23,6 +23,9 @@ export function Report() {
   const [evBusy, setEvBusy] = useState(false);
   const [evError, setEvError] = useState<string | null>(null);
   const [evPreview, setEvPreview] = useState<string | null>(null);
+  const [evTypeWarn, setEvTypeWarn] = useState<string | null>(null);
+  const [srcUrl, setSrcUrl] = useState("");
+  const [srcWarn, setSrcWarn] = useState<string | null>(null);
 
   // Screenshot evidence: hashed locally (SHA-256, tamper-evident), then
   // uploaded to a no-key public host. The contract pins url+hash; an edited
@@ -53,14 +56,49 @@ export function Report() {
     }
   };
 
+  // Manual URL check: validators analyze BYTES, so the link must serve an
+  // actual image (post pages serve HTML and would break consensus). Social
+  // posts work via their image CDN links (preview.redd.it, pbs.twimg.com,
+  // fbcdn) — or screenshot first, which is sturdier (CDN links can expire
+  // or sit behind login walls validators cannot pass).
+  const checkEvUrl = async (url: string) => {
+    const u = url.trim();
+    setEvTypeWarn(null);
+    if (!u) return;
+    if (!/^https?:\/\/.+\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(u)) {
+      setEvTypeWarn(
+        "That does not look like a direct image link (post pages serve HTML, not pixels). " +
+        "Use the image's own address (e.g. preview.redd.it, pbs.twimg.com, fbcdn) — or screenshot + upload above, which always works.",
+      );
+      return;
+    }
+    try {
+      const res = await fetch(u, { method: "HEAD" });
+      const ct = res.headers.get("content-type") ?? "";
+      if (res.ok && ct && !ct.startsWith("image/")) {
+        setEvTypeWarn(`That URL serves ${ct || "non-image content"}, not an image. Screenshot + upload instead.`);
+      }
+    } catch {
+      // Host blocks browser checks (CORS) — allow it; consensus fetch may still succeed server-side.
+    }
+  };
+
   const fileReport = async (e: React.FormEvent) => {
     e.preventDefault();
+    const src = srcUrl.trim();
+    if (src) {
+      if (src.length > 2000 || (!src.startsWith("http://") && !src.startsWith("https://"))) {
+        setSrcWarn("Source must be an http(s) URL, max 2000 chars.");
+        return;
+      }
+      setSrcWarn(null);
+    }
     if (evUrl.trim() && !/^[0-9a-fA-F]{64}$/.test(evHash.trim())) {
       setEvError("Evidence URL needs its 64-hex SHA-256 (upload a file, or paste the hash).");
       return;
     }
     const hash = await submit((s) =>
-      reportContent(s, communityId.trim(), content.trim(), author.trim() || "anonymous", context.trim(), evUrl.trim(), evHash.trim().toLowerCase()),
+      reportContent(s, communityId.trim(), content.trim(), author.trim() || "anonymous", context.trim(), evUrl.trim(), evHash.trim().toLowerCase(), src),
     );
     if (hash) {
       // Case ids are deterministic: community_id + global sequence. The newest
@@ -163,13 +201,20 @@ export function Report() {
               )}
               {evError && <p className="mt-1.5 text-xs text-red-800">{evError}</p>}
               <div className="mt-2">
-                <Label>…or paste an image URL + its SHA-256</Label>
+                <Label>…or paste a direct image URL + its SHA-256</Label>
+                <p className="-mt-1 mb-2 text-xs opacity-60">
+                  Post pages don't count — paste the image's own address (Reddit: preview.redd.it,
+                  X: pbs.twimg.com/media/…, Facebook: fbcdn link). Screenshot + upload is sturdier:
+                  CDN links can expire or hide behind logins.
+                </p>
                 <Input
                   value={evUrl}
                   onChange={(e) => setEvUrl(e.target.value)}
-                  placeholder="https://…"
+                  onBlur={(e) => void checkEvUrl(e.target.value)}
+                  placeholder="https://…png"
                   maxLength={2000}
                 />
+                {evTypeWarn && <p className="mt-1.5 text-xs text-amber-800">{evTypeWarn}</p>}
                 <Input
                   value={evHash}
                   onChange={(e) => setEvHash(e.target.value.trim())}
@@ -178,6 +223,21 @@ export function Report() {
                   className="mt-2 font-mono"
                 />
               </div>
+            </div>
+            <div>
+              <Label>Origin post link (optional — strengthens the case)</Label>
+              <p className="-mt-1 mb-2 text-xs opacity-60">
+                Link to the real post (Reddit thread, X post, forum page…). Validators try to
+                read it live and weigh it with your words and screenshot — if it can't be
+                fetched, the report is still judged on content + screenshot.
+              </p>
+              <Input
+                value={srcUrl}
+                onChange={(e) => setSrcUrl(e.target.value)}
+                placeholder="https://reddit.com/r/…/comments/…"
+                maxLength={2000}
+              />
+              {srcWarn && <p className="mt-1.5 text-xs text-red-800">{srcWarn}</p>}
             </div>
             <Button type="submit" disabled={busy || !address || evBusy}>
               {state.phase === "signing"

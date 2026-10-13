@@ -121,6 +121,23 @@ export function CaseDetail() {
       </Card>
 
       <EvidencePanel url={detail.evidence_url} hash={detail.evidence_hash} />
+      {detail.source_url && (
+        <Card className="mt-4">
+          <h2 className="text-sm font-bold">Origin post</h2>
+          <a
+            href={detail.source_url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 break-all font-mono text-xs text-gavel-deep underline"
+          >
+            {detail.source_url}
+          </a>
+          <p className="mt-1 text-xs opacity-60">
+            Validators attempted to read this live during consensus; if unreachable, the
+            verdict rests on the reported content and screenshot above.
+          </p>
+        </Card>
+      )}
 
       {detail.verdict ? (
         <Card className="mt-4 border-gavel-deep/40">

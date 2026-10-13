@@ -23,7 +23,7 @@ export const EXPLORER_URL = (
 ).replace(/\/+$/, "");
 
 export const CONTRACT_ADDRESS = (env("VITE_CONTRACT_ADDRESS") ??
-  "0x9dc9ef2DDa9bC9746Cfe4ced299610F43d474863") as `0x${string}`;
+  "0x4708b9Ace6EE163cD2bF77bcDed5f81F33ACA3B6") as `0x${string}`;
 
 export const ZERO = "0x0000000000000000000000000000000000000000";
 

@@ -47,7 +47,7 @@ function Footer() {
         <span className="inline-flex items-center gap-1 font-bold">
           <Gavel size={12} /> OpenGavel
         </span>
-        <span>Fair and transparent moderation · StudioNet · contract 0x9dc9ef2DDa9bC9746Cfe4ced299610F43d474863</span>
+        <span>Fair and transparent moderation · StudioNet · contract 0x4708b9Ace6EE163cD2bF77bcDed5f81F33ACA3B6</span>
       </div>
     </footer>
   );

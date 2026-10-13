@@ -180,9 +180,11 @@ def main() -> None:
     _ev_url = "https://files.catbox.moe/bhbinv.png"
     _ev_hash = "e07cd6f1a47cb760b7710002562aa8dba691b73ae4a080b5b806471798241552"
     _ev_text = "I disagree with your proposal because the budget numbers look wrong."
+    # example.com: ultra-stable fixture proving the source-fetch path runs.
+    _src_url = "https://example.com"
     write("report_content", ["general", _ev_text,
                              "alice", "forum post, no prior strikes",
-                             _ev_url, _ev_hash])
+                             _ev_url, _ev_hash, _src_url])
 
     # --- 5. list_cases ---------------------------------------------------------
     cases = call("list_cases", ["general", 20])
@@ -200,7 +202,8 @@ def main() -> None:
           and case.get("verdict") in ("ALLOW", "WARN", "REMOVE", "BAN", "ESCALATE")
           and case.get("rules_version") == 2
           and case.get("evidence_url") == _ev_url
-          and case.get("evidence_hash") == _ev_hash)
+          and case.get("evidence_hash") == _ev_hash
+          and case.get("source_url") == _src_url)
     record("get_case", "read",
            f"verdict={case.get('verdict')} severity={case.get('severity')} rules_v={case.get('rules_version')}",
            ok=ok)

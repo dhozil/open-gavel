@@ -161,10 +161,10 @@ def main() -> None:
                       acct=outsider)
     expect_write_fail("a08 short rules update", "update_rules", [COMM, "be nice"])
     expect_write_fail("a09 report unknown community", "report_content",
-                      ["nope", "hello", "bob", "ctx", "", ""])
-    expect_write_fail("a10 empty content", "report_content", [COMM, "   ", "bob", "ctx", "", ""])
+                      ["nope", "hello", "bob", "ctx", "", "", ""])
+    expect_write_fail("a10 empty content", "report_content", [COMM, "   ", "bob", "ctx", "", "", ""])
     expect_write_fail("a11 oversize content", "report_content",
-                      [COMM, "x" * 8001, "bob", "ctx", "", ""])
+                      [COMM, "x" * 8001, "bob", "ctx", "", "", ""])
     expect_write_fail("a12 moderate unknown case", "moderate_case", [f"{COMM}-999"])
     expect_read_fail("a13 get unknown case", "get_case", [f"{COMM}-999"])
     expect_read_fail("a14 get unknown community", "get_community", ["nope"])
@@ -172,15 +172,19 @@ def main() -> None:
     # evidence pair guards: url and sha256 must come together and be well-formed
     good_hash = hashlib.sha256(b"probe-bytes").hexdigest()
     expect_write_fail("a16 url without hash", "report_content",
-                      [COMM, "text", "bob", "ctx", "https://example.com/e/1", ""])
+                      [COMM, "text", "bob", "ctx", "https://example.com/e/1", "", ""])
     expect_write_fail("a17 hash without url", "report_content",
-                      [COMM, "text", "bob", "ctx", "", good_hash])
+                      [COMM, "text", "bob", "ctx", "", good_hash, ""])
     expect_write_fail("a18 non-hex hash", "report_content",
-                      [COMM, "text", "bob", "ctx", "https://example.com/e/1", "z" * 64])
+                      [COMM, "text", "bob", "ctx", "https://example.com/e/1", "z" * 64, ""])
     expect_write_fail("a19 short hash", "report_content",
-                      [COMM, "text", "bob", "ctx", "https://example.com/e/1", "abcd"])
+                      [COMM, "text", "bob", "ctx", "https://example.com/e/1", "abcd", ""])
     expect_write_fail("a20 non-http url", "report_content",
-                      [COMM, "text", "bob", "ctx", "ftp://example.com/e/1", good_hash])
+                      [COMM, "text", "bob", "ctx", "ftp://example.com/e/1", good_hash, ""])
+    expect_write_fail("a21 non-http source", "report_content",
+                      [COMM, "text", "bob", "ctx", "", "", "ftp://example.com/post/1"])
+    expect_write_fail("a22 long source", "report_content",
+                      [COMM, "text", "bob", "ctx", "", "", "https://example.com/" + "p" * 2000])
 
     print("\n--- B. adversarial content (LLM consensus) ---")
     cases = {
@@ -206,7 +210,7 @@ def main() -> None:
     ev_hash = "e07cd6f1a47cb760b7710002562aa8dba691b73ae4a080b5b806471798241552"
     for label, (text, _) in cases.items():
         expect_write_ok(f"{label} report", "report_content",
-                        [COMM, text, "mallory", "red-team probe", ev_url, ev_hash])
+                        [COMM, text, "mallory", "red-team probe", ev_url, ev_hash, ""])
     listed = call("list_cases", [COMM, 20])
     check("b0 six cases filed", isinstance(listed, list) and len(listed) == 6,
           f"count={len(listed) if isinstance(listed, list) else '?'}")
@@ -235,7 +239,7 @@ def main() -> None:
     expect_write_fail("c1 re-moderate DECIDED", "moderate_case", [ids["b1 hate slur"]])
     # appeal a PENDING case must fail
     expect_write_ok("c2 file pending case", "report_content",
-                    [COMM, "pending appeal probe", "bob", "ctx", "", ""])
+                    [COMM, "pending appeal probe", "bob", "ctx", "", "", ""])
     pending = sorted((c["case_id"] for c in call("list_cases", [COMM, 20])),
                      key=lambda cid: int(cid.rsplit("-", 1)[1]))[-1]
     expect_write_fail("c3 appeal PENDING case", "appeal_case", [pending, "appeal before verdict here"])

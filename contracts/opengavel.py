@@ -48,6 +48,9 @@ class Case:
     # edited screenshot can never match. Empty pair = text-only report.
     evidence_url: str
     evidence_hash: str
+    # Origin post link for human audit (appended last). Validators also try
+    # to read it opportunistically — see _fetch_source_text. Empty = none.
+    source_url: str
 
 
 def _clean_json_text(text: str) -> str:
@@ -132,7 +135,56 @@ def _check_evidence(url: str, digest: str) -> tuple[str, str]:
     return (url, digest)
 
 
-def _build_prompt(rules_text: str, rules_version: str, content_text: str, context: str, extra: str, evidence: str, seen_image: bool) -> str:
+def _check_source(url: str) -> str:
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if len(url) > 2000:
+        raise gl.vm.UserError(f"{ERROR_EXPECTED} Source url too long (max 2000 chars)")
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise gl.vm.UserError(f"{ERROR_EXPECTED} Source url must start with http(s)://")
+    return url
+
+
+def _fetch_source_text(url: str) -> str:
+    """Opportunistically read the origin post for the jury.
+
+    Best effort by design: login walls, deleted posts, and dynamic pages may
+    yield nothing — both leader and validators run the SAME fallback, so they
+    converge on judging the reported content + screenshot instead. Never
+    raises: an unreadable source degrades to text-only, never to failure.
+    Output is capped and tag-stripped for prompt stability.
+    """
+    if not url:
+        return ""
+    try:
+        res = gl.nondet.web.get(url)
+    except Exception:
+        return ""
+    try:
+        if res.status != 200:
+            return ""
+        raw = res.body
+        if isinstance(raw, bytes):
+            try:
+                text = raw.decode("utf-8", errors="ignore")
+            except Exception:
+                return ""
+        else:
+            text = str(raw)
+        if len(text) > 200000:
+            return ""
+        cleaned = re.sub(r"<[^>]{0,2000}>", " ", text)
+        cleaned = re.sub(r"[ \t\xa0]+", " ", cleaned)
+        cleaned = re.sub(r"\n\s*\n+", "\n", cleaned).strip()
+        if len(cleaned) < 40:
+            return ""
+        return cleaned[:4000]
+    except Exception:
+        return ""
+
+
+def _build_prompt(rules_text: str, rules_version: str, content_text: str, context: str, extra: str, evidence: str, seen_image: bool, source: str) -> str:
     evidence_block = (
         evidence
         if seen_image
@@ -159,6 +211,9 @@ CONTEXT (author, channel, prior strikes):
 SCREENSHOT EVIDENCE:
 {evidence_block}
 {image_line}
+
+ORIGIN POST (fetched live from the reported source link, may be empty):
+{source if source else "(unavailable — judge the reported content and screenshot above)"}
 
 {extra}
 
@@ -232,7 +287,7 @@ class OpenGavel(gl.Contract):
         return self.cases[case_id]
 
     def _run_moderation(
-        self, rules_text: str, rules_version: u256, content_text: str, context: str, extra: str, evidence_url: str, evidence_hash: str
+        self, rules_text: str, rules_version: u256, content_text: str, context: str, extra: str, evidence_url: str, evidence_hash: str, source_url: str
     ) -> dict:
         def leader_fn():
             images: list = []
@@ -248,7 +303,9 @@ class OpenGavel(gl.Contract):
                 # URL independently, so both sides analyze identical bytes.
                 images = [_fetch_evidence_bytes(evidence_url)]
                 seen_image = True
-            prompt = _build_prompt(rules_text, str(rules_version), content_text, context, extra, evidence_block, seen_image)
+            source_text = _fetch_source_text(source_url)
+            source_block = f"Source link: {source_url}\nLive excerpt:\n{source_text}" if source_text else ""
+            prompt = _build_prompt(rules_text, str(rules_version), content_text, context, extra, evidence_block, seen_image, source_block)
             try:
                 if seen_image:
                     response = gl.nondet.exec_prompt(prompt, images=images, response_format="json")
@@ -350,13 +407,14 @@ class OpenGavel(gl.Contract):
         self.communities[community_id] = community
 
     @gl.public.write
-    def report_content(self, community_id: str, content_text: str, author: str, context: str, evidence_url: str, evidence_hash: str) -> None:
+    def report_content(self, community_id: str, content_text: str, author: str, context: str, evidence_url: str, evidence_hash: str, source_url: str) -> None:
         self._require_community(community_id)
         if not content_text or not content_text.strip():
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Content text is empty")
         if len(content_text) > 8000:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Content too long (max 8000 chars)")
         evidence_url, evidence_hash = _check_evidence(evidence_url, evidence_hash)
+        source_url = _check_source(source_url)
         self.case_seq = self.case_seq + 1
         case_id = f"{community_id}-{int(self.case_seq)}"
         community = self.communities[community_id]
@@ -377,6 +435,7 @@ class OpenGavel(gl.Contract):
             appeal_count=0,
             evidence_url=evidence_url,
             evidence_hash=evidence_hash,
+            source_url=source_url,
         )
         self.cases[case_id] = case
         self.case_order.append(case_id)
@@ -395,6 +454,7 @@ class OpenGavel(gl.Contract):
             "",
             case.evidence_url,
             case.evidence_hash,
+            case.source_url,
         )
         case.verdict = result["verdict"]
         case.violated_rule_id = result["violated_rule_id"]
@@ -423,6 +483,7 @@ class OpenGavel(gl.Contract):
             f"APPEAL (reason: {appeal_reason.strip()[:1000]}). Re-evaluate carefully. Prior verdict: {case.verdict}. Overturn it only if the rules clearly support it.",
             case.evidence_url,
             case.evidence_hash,
+            case.source_url,
         )
         case.verdict = result["verdict"]
         case.violated_rule_id = result["violated_rule_id"]
@@ -455,6 +516,7 @@ class OpenGavel(gl.Contract):
             "appeal_count": int(case.appeal_count),
             "evidence_url": case.evidence_url,
             "evidence_hash": case.evidence_hash,
+            "source_url": case.source_url,
         }
 
     @gl.public.view

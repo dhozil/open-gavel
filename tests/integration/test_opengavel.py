@@ -20,7 +20,7 @@ def test_community_lifecycle():
     assert "R1" in community["rules_text"]
 
     tx = contract.report_content(
-        args=["general", "I disagree with your proposal because the budget numbers look wrong.", "alice", "forum post, no prior strikes", "", ""]
+        args=["general", "I disagree with your proposal because the budget numbers look wrong.", "alice", "forum post, no prior strikes", "", "", ""]
     ).transact()
     assert tx_execution_succeeded(tx)
 
