@@ -1,0 +1,4 @@
+genlayer-test==0.1.1
+genvm-linter
+requests==2.32.2
+python-dotenv==1.0.1

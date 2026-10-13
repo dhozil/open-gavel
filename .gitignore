@@ -1,0 +1,23 @@
+# Credentials - never commit these.
+.env
+.env.*
+!.env.example
+credentials.json
+address.txt
+*keystore*.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.gltest_cache/
+
+# Frontend (see frontend/.gitignore for the rest)
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- OpenGavel: ink seal, gold coin, gavel striking diagonally -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#14120C"/>
+  <circle cx="32" cy="32" r="21" fill="#C9A227"/>
+  <circle cx="32" cy="32" r="21" fill="none" stroke="#F4F1EA" stroke-width="2" opacity="0.55"/>
+  <g transform="rotate(45 32 32)" fill="#14120C">
+    <rect x="19" y="12" width="26" height="9" rx="3"/>
+    <rect x="29" y="21" width="6" height="31" rx="3"/>
+  </g>
+  <circle cx="32" cy="52" r="2.4" fill="#F4F1EA"/>
+</svg>

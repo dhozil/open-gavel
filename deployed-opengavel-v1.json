@@ -1,0 +1,7 @@
+{
+  "network": "studionet",
+  "deployer": "0x88D0Fc097bE4cb773A695Db8e22F4CFb7f563848",
+  "contract": "OpenGavel",
+  "address": "0x1E5aB482B51bC88A99a4BfF4d52d803A89e3021d",
+  "tx": "0xc3795a39dfa85ab5348b31b680b528cb08e914f1a5ff86d02b43929067346bea"
+}
