@@ -1,0 +1,31 @@
+{
+  "current": "v5",
+  "network": "studionet",
+  "versions": {
+    "v1": {
+      "address": "0x1E5aB482B51bC88A99a4BfF4d52d803A89e3021d",
+      "tx": "0xc3795a39dfa85ab5348b31b680b528cb08e914f1a5ff86d02b43929067346bea",
+      "notes": "Initial 8-method release; report_content takes 4 args, no evidence."
+    },
+    "v2": {
+      "address": "0xd41824f7142915714fB81F8db17944576a259F47",
+      "tx": "0xe92a386c1807ffb7420351425283d3f2dce39a759f6ec7c1e6c848c1e650ed04",
+      "notes": "On-chain ownership registry: community_ids + list_communities + list_communities_by_admin (10 methods)."
+    },
+    "v3": {
+      "address": "0x9dc9ef2DDa9bC9746Cfe4ced299610F43d474863",
+      "tx": "0x7946a0be89e8e5e2c73e162bc828d12010f25c5abbaba2a0617b8bb9683701ab",
+      "notes": "Screenshot evidence: Case.evidence_url + evidence_hash, BOTH-or-NEITHER validation."
+    },
+    "v4": {
+      "address": "0x6fE5290C8c701Cb12727b96CEa1De9A5e976A04d",
+      "tx": "0x62284fe2907b3e608a04ee34d984cada1c3e2d1d8dc79b6d7eb5951770c842ba",
+      "notes": "Vision evidence: validators fetch pinned bytes, images=[...] multimodal verdicts."
+    },
+    "v5": {
+      "address": "0x4708b9Ace6EE163cD2bF77bcDed5f81F33ACA3B6",
+      "tx": "0xa3204212abee9b199117dd335f06b7e2239a13e03f6d2d25242f02ecdb4bbfdd",
+      "notes": "Origin posts: Case.source_url + opportunistic live fetch into consensus."
+    }
+  }
+}
