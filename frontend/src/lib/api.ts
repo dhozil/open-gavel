@@ -178,37 +178,51 @@ export async function verifyEvidence(
   return hash.toLowerCase() === pinned.toLowerCase() ? "match" : "mismatch";
 }
 
-/** Anonymous no-key image host for screenshot evidence (Catbox).
- *  Retries with backoff: the host occasionally resets connections
- *  (seen server-side too), and StudioNet-era file hosts rate-limit by IP. */
+/** Anonymous no-key image hosts for screenshot evidence.
+ *  Catbox first (permanent, content-deduped), uguu.se as fallback.
+ *  Retries with backoff per host: file hosts occasionally reset connections
+ *  or grey-list IPs, and a single host failing must never strand a report. */
+async function tryCatbox(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("reqtype", "fileupload");
+  form.append("fileToUpload", file);
+  const res = await fetch("https://catbox.moe/user/api.php", { method: "POST", body: form });
+  if (!res.ok) throw new Error(`Catbox HTTP ${res.status}`);
+  const url = (await res.text()).trim();
+  if (!url.startsWith("https://")) throw new Error(`Catbox rejected: ${url.slice(0, 80)}`);
+  return url;
+}
+
+async function tryUguu(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("files[]", file, "evidence.png");
+  const res = await fetch("https://uguu.se/upload.php", { method: "POST", body: form });
+  if (!res.ok) throw new Error(`uguu.se HTTP ${res.status}`);
+  const data = (await res.json()) as { success?: boolean; files?: Array<{ url?: string }> };
+  const url = data?.files?.[0]?.url ?? "";
+  if (!data?.success || !url.startsWith("https://")) throw new Error("uguu.se rejected the file");
+  return url;
+}
+
 export async function uploadEvidence(file: File): Promise<string> {
-  let last = "";
-  for (let i = 0; i < 3; i++) {
-    try {
-      const form = new FormData();
-      form.append("reqtype", "fileupload");
-      form.append("fileToUpload", file);
-      const res = await fetch("https://catbox.moe/user/api.php", { method: "POST", body: form });
-      if (!res.ok) {
-        last = `Upload rejected (HTTP ${res.status}).`;
+  const hosts: Array<[string, (f: File) => Promise<string>]> = [
+    ["Catbox", tryCatbox],
+    ["uguu.se", tryUguu],
+  ];
+  const problems: string[] = [];
+  for (const [name, fn] of hosts) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        return await fn(file);
+      } catch (e) {
+        problems.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
         await sleep(2000 * (i + 1));
-        continue;
       }
-      const url = (await res.text()).trim();
-      if (!url.startsWith("https://")) {
-        last = `Upload rejected: ${url.slice(0, 80)}`;
-        await sleep(2000 * (i + 1));
-        continue;
-      }
-      return url;
-    } catch (e) {
-      last = e instanceof Error ? e.message : String(e);
-      await sleep(2000 * (i + 1));
     }
   }
   throw new Error(
-    `Upload failed after 3 tries (${last || "network blocked"}). ` +
-    "Check ad-blocker/VPN, or host the image anywhere public and paste its URL + SHA-256 below.",
+    `All upload hosts failed (${problems.join(" | ")}). ` +
+    "Host the image anywhere public and paste its URL + SHA-256 below.",
   );
 }
 
