@@ -13,7 +13,7 @@ stored on-chain — with the reasoning, the rule cited, and the rules version.
 | | |
 |---|---|
 | Contract | `OpenGavel` |
-| Address | `0x6fE5290C8c701Cb12727b96CEa1De9A5e976A04d` |
+| Address | `0x13A6D9439963bac9Baf891c5e9660A9E6DaCf1b6` |
 | Methods | 10 (5 write + 5 view) |
 | History | `deployed-opengavel-v1/v2/v3.json` (immutable predecessors) |
 

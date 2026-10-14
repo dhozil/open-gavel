@@ -2,7 +2,7 @@
 import { chains, createClient } from "genlayer-js";
 
 const client = createClient({ chain: chains.studionet, endpoint: "https://studio.genlayer.com/api" });
-const address = "0x4708b9Ace6EE163cD2bF77bcDed5f81F33ACA3B6";
+const address = "0x13A6D9439963bac9Baf891c5e9660A9E6DaCf1b6";
 
 const community = await client.readContract({ address, functionName: "get_community", args: ["general"] });
 console.log("community:", community.name, "v" + community.version);
