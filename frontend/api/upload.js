@@ -45,17 +45,46 @@ export default async function handler(req, res) {
     }
     const safeName = String(name || "evidence.jpg").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64);
     const { body, boundary } = multipart("fileToUpload", safeName, "image/jpeg", bytes);
-    const up = await fetch(CATBOX, {
-      method: "POST",
-      headers: { "Content-Type": `multipart/form-data; boundary=${boundary}`, "User-Agent": "OpenGavel/1.0" },
-      body,
-    });
-    const url = (await up.text()).trim();
-    if (!up.ok || !url.startsWith("https://")) {
-      res.status(502).json({ error: `Host rejected upload${up.ok ? `: ${url.slice(0, 80)}` : ` (HTTP ${up.status})`}.` });
-      return;
+    const problems = [];
+    try {
+      const up = await fetch(CATBOX, {
+        method: "POST",
+        headers: { "Content-Type": `multipart/form-data; boundary=${boundary}`, "User-Agent": "OpenGavel/1.0" },
+        body,
+      });
+      const text = (await up.text()).trim();
+      if (up.ok && text.startsWith("https://")) {
+        res.status(200).json({ url: text });
+        return;
+      }
+      problems.push(`Catbox HTTP ${up.status}: ${text.slice(0, 120)}`);
+    } catch (e) {
+      problems.push(`Catbox: ${e instanceof Error ? e.message : String(e)}`);
     }
-    res.status(200).json({ url });
+    // Server-side fallback: uguu.se (same bytes, JSON answer).
+    try {
+      const uBoundary = "----opengavel" + Date.now().toString(36) + "u";
+      const head = Buffer.from(
+        `--${uBoundary}\r\nContent-Disposition: form-data; name="files[]"; filename="${safeName}"\r\nContent-Type: image/jpeg\r\n\r\n`,
+        "utf8",
+      );
+      const tail = Buffer.from(`\r\n--${uBoundary}--\r\n`, "utf8");
+      const up2 = await fetch("https://uguu.se/upload.php", {
+        method: "POST",
+        headers: { "Content-Type": `multipart/form-data; boundary=${uBoundary}`, "User-Agent": "OpenGavel/1.0" },
+        body: Buffer.concat([head, bytes, tail]),
+      });
+      const j = await up2.json().catch(() => null);
+      const url = j?.files?.[0]?.url ?? "";
+      if (up2.ok && j?.success && url.startsWith("https://")) {
+        res.status(200).json({ url });
+        return;
+      }
+      problems.push(`uguu.se HTTP ${up2.status}`);
+    } catch (e) {
+      problems.push(`uguu.se: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    res.status(502).json({ error: `Upload rejected (${problems.join(" | ")}).` });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
