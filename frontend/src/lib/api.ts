@@ -204,10 +204,30 @@ async function tryUguu(file: File): Promise<string> {
   return url;
 }
 
+async function tryProxy(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < buf.length; i += chunk) {
+    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+  }
+  const res = await fetch("/api/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: btoa(binary), name: file.name || "evidence.jpg" }),
+  });
+  const data = (await res.json()) as { url?: string; error?: string };
+  if (!res.ok || !data.url?.startsWith("https://")) {
+    throw new Error(data.error ?? `Proxy HTTP ${res.status}`);
+  }
+  return data.url;
+}
+
 export async function uploadEvidence(file: File): Promise<string> {
   const hosts: Array<[string, (f: File) => Promise<string>]> = [
     ["Catbox", tryCatbox],
     ["uguu.se", tryUguu],
+    ["OpenGavel proxy", tryProxy],
   ];
   const problems: string[] = [];
   for (const [name, fn] of hosts) {
